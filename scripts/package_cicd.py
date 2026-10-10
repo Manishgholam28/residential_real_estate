@@ -1,4 +1,4 @@
-"""Package only the source needed for GitHub CI and CloudShell setup."""
+"""Package the application source and its current CI/CD configuration."""
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 
@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 files = [
     "app.py", "model_service.py", "train_model.py", "requirements.txt",
     "requirements-ci.txt", "Dockerfile", ".dockerignore", ".gitignore",
-    ".gitattributes", "README.md", "AWS_CICD_GUIDE.md", "DEPLOYMENT.md",
+    ".gitattributes", "README.md", "EC2_CICD_NOTES.md", "AWS_CICD_GUIDE.md", "DEPLOYMENT.md",
     "gurgaon_properties_missing_value_imputation.csv",
 ]
 for folder in [".github/workflows", "infra", "scripts", "templates", "static", "tests"]:

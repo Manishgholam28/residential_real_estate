@@ -17,6 +17,7 @@ For a fresh checkout, create a virtual environment and install the requirements 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe train_model.py
 .\.venv\Scripts\python.exe app.py
 ```
 
@@ -31,17 +32,17 @@ docker build --platform linux/amd64 -t gurgaon-property-estimator .
 docker run --name gurgaon-property-estimator --rm -p 8000:8000 gurgaon-property-estimator
 ```
 
-Open http://localhost:8000 and check http://localhost:8000/api/health. The Docker build includes the trained artifacts and frontend, and excludes notebooks, raw datasets, local credentials, and the virtual environment. The application runs as a non-root user with Waitress, using one model instance per server process.
+Open http://localhost:8000 and check http://localhost:8000/api/health. The Docker build includes the trained artifacts and frontend, and excludes notebooks, raw datasets, local credentials, and the virtual environment. The application uses Waitress, with one model instance per server process. Generate both model files before building from a fresh checkout.
 
 The Docker daemon must be running to build and test the container. Having the Docker CLI installed alone is insufficient. Container execution needs separate verification from the local Python checks.
 
 ## Public AWS deployment
 
-**Status:** the CI/CD workflow and bootstrap template are implemented; a public service still needs a successful run in your AWS account. Follow [AWS_CICD_GUIDE.md](AWS_CICD_GUIDE.md).
+**Status:** `.github/workflows/main.yml` is implemented; a public service still needs a successful run in your AWS account. See [EC2_CICD_NOTES.md](EC2_CICD_NOTES.md) for the chosen ECR and EC2 approach.
 
-The workflow rebuilds the model from the versioned prepared dataset, tests the API and container, pushes a uniquely tagged image to Amazon ECR, and deploys it through Amazon ECS Express Mode. AWS authentication uses GitHub OIDC. The successful run summary contains the actual public HTTPS URL.
+The workflow rebuilds the model from the versioned prepared dataset, tests the API and container, and pushes a uniquely tagged image to Amazon ECR. A self-hosted Linux x64 runner installed on EC2 pulls the image and runs `mltest` with port mapping `8080:8000`. AWS authentication uses GitHub repository secrets. After successful deployment, verify `http://YOUR_EC2_PUBLIC_IP:8080` from your browser using your actual public address.
 
-The earlier App Runner instructions are superseded: AWS stopped accepting new App Runner customers on April 30, 2026. See [AWS's availability notice](https://docs.aws.amazon.com/apprunner/latest/dg/apprunner-availability-change.html).
+The previous ECS Express/OIDC walkthrough is retained as an archived alternative in `AWS_CICD_GUIDE.md`; it is not the active deployment path.
 
 AWS resources incur charges. A local browser URL does not establish that public deployment has occurred. For another container provider, expose port 8000, preserve both model files, and configure `/api/health`.
 

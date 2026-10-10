@@ -15,9 +15,9 @@ Open http://localhost:8000. Model artifacts are generated locally and excluded f
 
 ## CI/CD and AWS
 
-Read [AWS_CICD_GUIDE.md](AWS_CICD_GUIDE.md) for the first push, account setup, public deployment, and interview explanation.
+The active workflow is [.github/workflows/main.yml](.github/workflows/main.yml). See [EC2_CICD_NOTES.md](EC2_CICD_NOTES.md) for its required secrets, EC2 runner, and port configuration.
 
-The GitHub Actions workflow rebuilds the model artifacts, tests the API, and tests the Docker container. Once AWS repository variables are configured, successful changes on `main` publish a versioned image to Amazon ECR and deploy it through Amazon ECS Express Mode. Pull requests run CI without deployment. AWS access uses temporary OIDC credentials.
+On pushes to `main`, GitHub-hosted jobs rebuild the model artifacts, test the API and Docker container, and publish a uniquely tagged image to Amazon ECR. A self-hosted Linux x64 runner on EC2 pulls that image and replaces the application container. AWS access uses repository secrets. EC2 port 8080 maps to application port 8000. The workflow does not deploy pull requests.
 
 **Status:** CI/CD files are implemented. A successful GitHub Actions run and an authenticated AWS deployment still need to be performed in your accounts. No public AWS URL is claimed by this repository.
 

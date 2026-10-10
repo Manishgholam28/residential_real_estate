@@ -1,0 +1,192 @@
+name: workflow
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['README.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize runs so two pushes cannot replace the EC2 container at the same time.
+concurrency:
+  group: real-estate-ec2-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  integration:
+    name: Continuous Integration
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Check Python syntax
+        run: python -m compileall -q app.py model_service.py train_model.py scripts tests
+
+      - name: Train and export model files
+        run: python train_model.py
+
+      - name: Run prediction API tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Save the model files that passed tests
+        uses: actions/upload-artifact@v7
+        with:
+          name: tested-model
+          path: |
+            pipeline.pkl
+            df.pkl
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
+
+  build-and-push-ecr-image:
+    name: Continuous Delivery
+    needs: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download the tested model files
+        uses: actions/download-artifact@v8
+        with:
+          name: tested-model
+
+      - name: Build the application image
+        run: docker build --platform linux/amd64 --tag real-estate-ci .
+
+      - name: Start a test container
+        run: docker run --detach --name real-estate-ci --publish 127.0.0.1:18000:8000 real-estate-ci
+
+      - name: Check the frontend and a real prediction
+        run: python3 scripts/smoke_test.py --base-url http://127.0.0.1:18000 --wait-seconds 120
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs real-estate-ci || true
+
+      - name: Stop the test container
+        if: always()
+        run: docker rm --force real-estate-ci || true
+
+      - name: Check AWS configuration
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+        run: |
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION ECR_REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret: $name (ECR_REPOSITORY uses ECR_REPOSITORY_NAME)."
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag and push the tested image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+        run: |
+          image="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker tag real-estate-ci "$image"
+          docker push "$image"
+
+  Continuous-Deployment:
+    name: Continuous Deployment to EC2
+    needs: build-and-push-ecr-image
+    # Install this runner on the EC2 instance that will serve the application.
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check EC2 runner tools
+        run: |
+          docker info > /dev/null
+          python3 --version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          unset-current-credentials: true
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Pull the tested image and replace the application container
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+        run: |
+          image="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          # Pull successfully before stopping the existing application.
+          docker pull "$image"
+          if docker container inspect mltest > /dev/null 2>&1; then
+            docker rm --force mltest
+          fi
+          docker run --detach --restart unless-stopped \
+            --publish 8080:8000 --name mltest "$image"
+
+      - name: Verify the running application on EC2
+        run: python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080 --wait-seconds 120
+
+      - name: Show deployment logs on failure
+        if: failure()
+        run: docker logs --tail 100 mltest || true
+
+      - name: Save deployment details
+        run: |
+          {
+            echo '## EC2 application check passed'
+            echo 'Container: mltest'
+            echo 'Port mapping: EC2 8080 -> container 8000'
+            echo "Image tag: $IMAGE_TAG"
+            echo 'Browser URL: http://YOUR_EC2_PUBLIC_IP:8080 (replace with your actual address).'
+            echo 'The local check does not verify the public security group or network path.'
+          } >> "$GITHUB_STEP_SUMMARY"

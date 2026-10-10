@@ -1,5 +1,7 @@
 # Your first AWS deployment with CI/CD
 
+> Archived alternative: the active workflow is now `main.yml` using ECR and a self-hosted EC2 runner. Its requirements are in [EC2_CICD_NOTES.md](EC2_CICD_NOTES.md). The ECS Express/OIDC workflow files described below have been removed; these instructions do not apply to the active workflow. The unused bootstrap template and OIDC helper remain available for reference.
+
 This guide is for this project. The automation files are implemented; a public deployment is complete only after the workflow succeeds in your GitHub and AWS accounts and the real URL passes its prediction check.
 
 ## What the pipeline does

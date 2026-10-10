@@ -2,7 +2,7 @@
 
 This guide is based on the Python files, CSV datasets, notebook code, and saved notebook outputs in this folder. The models were not retrained for this review. Use the first-person script only for work you personally performed; adjust your contribution statement for team or tutorial-based work.
 
-CI/CD update: `.github/workflows/ci-cd.yml` now defines model rebuilding, API checks, container checks, and deployment to ECR/ECS Express Mode. The AWS bootstrap and first-run steps are in `AWS_CICD_GUIDE.md`. These files do not establish that a GitHub run or live AWS deployment has occurred; demonstrate the actual successful run and URL before claiming that.
+CI/CD update: `.github/workflows/main.yml` now defines model rebuilding, API checks, container checks, publishing to ECR, and deployment by a self-hosted runner on EC2. It uses AWS repository secrets and maps EC2 port 8080 to container port 8000. Required configuration is in `EC2_CICD_NOTES.md`. These files do not establish that a GitHub run or live AWS deployment has occurred; demonstrate the actual successful run and URL before claiming that.
 
 ## Two-minute presentation script
 
