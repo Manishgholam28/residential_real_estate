@@ -1,0 +1,151 @@
+name: Test and deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Train, test, and check the container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-ci.txt
+      - name: Install application and validation dependencies
+        run: python -m pip install -r requirements.txt -r requirements-ci.txt
+      - name: Validate the AWS infrastructure template
+        run: cfn-lint infra/bootstrap.yaml --regions ap-south-1
+      - name: Build model artifacts from the versioned prepared dataset
+        run: python train_model.py
+      - name: Run prediction API tests
+        run: python -m unittest discover -s tests -v
+      - name: Build the Linux deployment image
+        run: docker build --platform linux/amd64 --tag property-ci .
+      - name: Start the application container
+        run: docker run --detach --name property-ci --publish 127.0.0.1:18000:8000 property-ci
+      - name: Check container health and a real prediction
+        run: python scripts/smoke_test.py --base-url http://127.0.0.1:18000 --wait-seconds 120
+      - name: Show container logs if a check fails
+        if: failure()
+        run: docker logs property-ci || true
+      - name: Stop the test container
+        if: always()
+        run: docker rm --force property-ci || true
+      - name: Save the exact model artifacts that passed CI
+        uses: actions/upload-artifact@v7
+        with:
+          name: tested-model
+          path: |
+            pipeline.pkl
+            df.pkl
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
+      - name: Explain the deployment gate
+        if: vars.AWS_ROLE_ARN == ''
+        run: |
+          echo 'CI passed. AWS deployment is skipped until the repository variables in AWS_CICD_GUIDE.md are configured.' >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Publish the tested application to AWS
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: aws-production
+      cancel-in-progress: false
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'gurgaon-property-estimator' }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'gurgaon-property-estimator-cluster' }}
+      ECS_SERVICE: ${{ vars.ECS_SERVICE || 'gurgaon-property-estimator' }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_EXECUTION_ROLE_ARN: ${{ vars.AWS_EXECUTION_ROLE_ARN }}
+      AWS_INFRASTRUCTURE_ROLE_ARN: ${{ vars.AWS_INFRASTRUCTURE_ROLE_ARN }}
+      CLOUDWATCH_LOG_GROUP: ${{ vars.CLOUDWATCH_LOG_GROUP }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check deployment configuration
+        run: |
+          for name in AWS_ROLE_ARN AWS_EXECUTION_ROLE_ARN AWS_INFRASTRUCTURE_ROLE_ARN CLOUDWATCH_LOG_GROUP; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository variable $name is missing. Follow AWS_CICD_GUIDE.md."
+              exit 1
+            fi
+          done
+      - name: Retrieve the model that passed CI
+        uses: actions/download-artifact@v8
+        with:
+          name: tested-model
+      - name: Get temporary AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-${{ github.run_id }}
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push a uniquely tagged image
+        id: image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          image="$ECR_REGISTRY/$ECR_REPOSITORY:${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --platform linux/amd64 --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$image" .
+          docker push "$image"
+          echo "uri=$image" >> "$GITHUB_OUTPUT"
+      - name: Deploy and wait for ECS Express Mode
+        id: ecs
+        uses: aws-actions/amazon-ecs-deploy-express-service@v1
+        with:
+          cluster: ${{ env.ECS_CLUSTER }}
+          service-name: ${{ env.ECS_SERVICE }}
+          image: ${{ steps.image.outputs.uri }}
+          execution-role-arn: ${{ env.AWS_EXECUTION_ROLE_ARN }}
+          infrastructure-role-arn: ${{ env.AWS_INFRASTRUCTURE_ROLE_ARN }}
+          container-port: '8000'
+          health-check-path: /api/health
+          cpu: '512'
+          memory: '1024'
+          min-task-count: '1'
+          max-task-count: '1'
+          log-group: ${{ env.CLOUDWATCH_LOG_GROUP }}
+      - name: Check the deployed public application
+        env:
+          DEPLOYED_URL: ${{ steps.ecs.outputs.endpoint }}
+        run: python3 scripts/smoke_test.py --base-url "$DEPLOYED_URL" --wait-seconds 120
+      - name: Save deployment details for the demonstration
+        env:
+          DEPLOYED_URL: ${{ steps.ecs.outputs.endpoint }}
+          SERVICE_ARN: ${{ steps.ecs.outputs.service-arn }}
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
+        run: |
+          {
+            echo '## AWS deployment verified'
+            echo "Application: $DEPLOYED_URL"
+            echo "Service ARN: $SERVICE_ARN"
+            echo "Image: $IMAGE_URI"
+            echo "Commit: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"

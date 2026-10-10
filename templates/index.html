@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Estimate Gurgaon residential property listing prices using your property's location, size, and features.">
+  <meta name="theme-color" content="#102b43">
+  <title>Gurgaon Property Price Estimator</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#property-form">Skip to property details</a>
+  <header class="topbar"><div class="topbar-inner">
+    <a class="brand" href="/" aria-label="Gurgaon Property home"><span class="brand-mark" aria-hidden="true">G</span><span>Gurgaon<span class="brand-light"> Property</span></span></a>
+    <span class="coverage-badge">Gurgaon · Residential</span>
+  </div></header>
+  <main class="workspace">
+    <div class="page-heading"><p class="eyebrow">PROPERTY PRICE ESTIMATOR</p><h1>What could your property be worth?</h1><p>Enter the details of a Gurgaon flat or independent house to estimate its listing price.</p></div>
+    <div class="workspace-grid">
+      <section class="form-card" aria-labelledby="details-heading">
+        <div class="card-heading"><div><h2 id="details-heading">Property details</h2><p>A few details for a more relevant estimate.</p></div><button id="example-button" class="text-button" type="button" disabled>Load example</button></div>
+        <p id="service-status" class="service-status" role="status">Loading available property options…</p>
+        <form id="property-form"><fieldset id="property-fields" disabled>
+          <div class="form-section"><h3><span class="section-number">01</span> Location &amp; property</h3><div class="field-grid">
+            <div class="field"><label for="property-type">Property type</label><select id="property-type" name="property_type" required></select></div>
+            <div class="field"><label for="sector">Sector / locality</label><select id="sector" name="sector" required></select></div>
+            <div class="field field-wide"><label for="possession">Age / possession</label><select id="possession" name="agePossession" required></select></div>
+          </div></div>
+          <div class="form-section"><h3><span class="section-number">02</span> Size &amp; layout</h3><div class="field-grid">
+            <div class="field field-wide"><label for="area">Built-up area <span class="label-detail">square feet</span></label><div class="input-unit"><input id="area" name="built_up_area" type="number" min="100" max="20000" step="any" value="1500" required><span>sqft</span></div></div>
+            <div class="field"><label for="bedrooms">Bedrooms</label><input id="bedrooms" name="bedRoom" type="number" min="1" max="20" step="1" value="3" required></div>
+            <div class="field"><label for="bathrooms">Bathrooms</label><input id="bathrooms" name="bathroom" type="number" min="1" max="20" step="1" value="2" required></div>
+            <div class="field"><label for="balconies">Balconies</label><select id="balconies" name="balcony" required></select></div>
+            <div class="field"><label for="floor">Floor category</label><select id="floor" name="floor_category" required></select></div>
+          </div></div>
+          <div class="form-section"><h3><span class="section-number">03</span> Finishes &amp; extras</h3><div class="field-grid">
+            <div class="field"><label for="furnishing">Furnishing</label><select id="furnishing" name="furnishing_type" required></select></div>
+            <div class="field"><label for="luxury">Luxury category</label><select id="luxury" name="luxury_category" required></select></div>
+            <div class="field"><label for="servant-room">Servant room</label><select id="servant-room" name="servant room"><option value="0">No</option><option value="1">Yes</option></select></div>
+            <div class="field"><label for="store-room">Store room</label><select id="store-room" name="store room"><option value="0">No</option><option value="1">Yes</option></select></div>
+          </div><details class="category-help"><summary>How are the categories defined?</summary><p>Low floor: 0–2. Mid floor: 3–10. High floor: 11–51. Luxury reflects the property's amenities: Low for a score below 50, Medium from 50 to below 150, and High from 150 to 175 in the project dataset.</p></details></div>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+          <button id="predict-button" class="primary-button" type="submit">Estimate property price</button>
+        </fieldset></form>
+      </section>
+      <aside class="estimate-column" aria-labelledby="estimate-heading">
+        <section class="estimate-card" aria-live="polite" aria-atomic="true">
+          <div class="estimate-top"><span class="eyebrow">YOUR ESTIMATE</span><span class="estimate-tag">INR</span></div>
+          <div id="empty-result"><div class="empty-symbol" aria-hidden="true">₹</div><h2 id="estimate-heading">A starting point for<br>your next decision.</h2><p>Your price estimate will appear here after you enter the property details.</p></div>
+          <div id="prediction-result" hidden><p class="result-label">Estimated listing price</p><h2 id="price-value" class="price-value"></h2><p id="price-rupees" class="price-rupees"></p>
+            <div class="range-box"><span>Illustrative range · ±10%</span><strong id="range-value"></strong></div><p class="range-note">This fixed range is an illustration, not a statistical prediction interval.</p>
+            <div class="result-divider"></div><p class="result-label">Based on your property</p><p id="property-summary" class="property-summary"></p>
+          </div>
+        </section>
+        <section class="context-card"><h3>A useful estimate, with context.</h3><p>Prices are estimated from Gurgaon property listings. Actual prices can vary with condition, negotiation, and changes in the market.</p><div class="context-row"><span>Coverage</span><strong>Gurgaon</strong></div><div class="context-row"><span>Property types</span><strong>Flats &amp; houses</strong></div></section>
+      </aside>
+    </div>
+    <footer class="page-footer">Gurgaon Property <span>Residential listing price estimates</span></footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+artifacts/
+.env
+.aws/
+deployment-bundle.zip
+aws-cicd-source.zip
+*.pkl
+.ipynb_checkpoints/
+gurgaon_properties_post_feature_selection_v2.csv

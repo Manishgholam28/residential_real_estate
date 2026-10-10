@@ -1,0 +1,11 @@
+**
+!Dockerfile
+!requirements.txt
+!app.py
+!model_service.py
+!pipeline.pkl
+!df.pkl
+!templates/
+!templates/**
+!static/
+!static/**
