@@ -14,9 +14,6 @@ concurrency:
   group: real-estate-ec2-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-
 defaults:
   run:
     shell: bash
@@ -68,6 +65,11 @@ jobs:
     needs: integration
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    outputs:
+      image-digest: ${{ steps.push-image.outputs.digest }}
+      image-tag: ${{ steps.push-image.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -122,6 +124,7 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Tag and push the tested image
+        id: push-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
@@ -129,6 +132,23 @@ jobs:
           image="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           docker tag real-estate-ci "$image"
           docker push "$image"
+          # Pass the published identity forward; a deploy-only retry has a new attempt.
+          # A local image may list several repository digests; select this ECR repository.
+          repo_digests="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image")"
+          digest=''
+          while IFS= read -r reference; do
+            if [[ "$reference" == "$ECR_REGISTRY/$ECR_REPOSITORY@"* ]]; then
+              digest="${reference##*@}"
+              break
+            fi
+          done <<< "$repo_digests"
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo '::error::Could not determine the digest of the published ECR image.'
+            exit 1
+          fi
+          # Only the hash and non-secret tag cross jobs; registry/repository may be secrets.
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
   Continuous-Deployment:
     name: Continuous Deployment to EC2
@@ -136,6 +156,9 @@ jobs:
     # Install this runner on the EC2 instance that will serve the application.
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 15
+    env:
+      IMAGE_DIGEST: ${{ needs.build-and-push-ecr-image.outputs.image-digest }}
+      IMAGE_TAG: ${{ needs.build-and-push-ecr-image.outputs.image-tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -146,6 +169,7 @@ jobs:
         run: |
           docker info > /dev/null
           python3 --version
+          free -h
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -164,7 +188,11 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
         run: |
-          image="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo '::error::The successful build job did not supply an image digest. Start a new complete run of the updated workflow.'
+            exit 1
+          fi
+          image="$ECR_REGISTRY/$ECR_REPOSITORY@$IMAGE_DIGEST"
           # Pull successfully before stopping the existing application.
           docker pull "$image"
           if docker container inspect mltest > /dev/null 2>&1; then
@@ -176,9 +204,16 @@ jobs:
       - name: Verify the running application on EC2
         run: python3 scripts/smoke_test.py --base-url http://127.0.0.1:8080 --wait-seconds 120
 
-      - name: Show deployment logs on failure
+      - name: Show EC2 memory and deployment diagnostics on failure
         if: failure()
-        run: docker logs --tail 100 mltest || true
+        run: |
+          free -h || true
+          docker stats --no-stream mltest || true
+          docker inspect --format 'Status={{.State.Status}} OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}} Restarts={{.RestartCount}} MemoryLimit={{.HostConfig.Memory}}' mltest || true
+          docker logs --tail 100 mltest || true
+          # Kernel logs distinguish a host process being killed from a container OOM.
+          # -n prevents sudo from waiting for an interactive password in CI.
+          sudo -n journalctl -k --since '15 minutes ago' --no-pager | grep -Ei 'out of memory|oom|killed process' || true
 
       - name: Save deployment details
         run: |
@@ -187,6 +222,7 @@ jobs:
             echo 'Container: mltest'
             echo 'Port mapping: EC2 8080 -> container 8000'
             echo "Image tag: $IMAGE_TAG"
-            echo 'Browser URL: http://YOUR_EC2_PUBLIC_IP:8080 (replace with your actual address).'
+            echo "Published image digest: $IMAGE_DIGEST"
+            echo 'Browser URL: http://3.25.153.161:8080 (replace with your actual address).'
             echo 'The local check does not verify the public security group or network path.'
           } >> "$GITHUB_STEP_SUMMARY"
